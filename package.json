@@ -1,24 +1,24 @@
 {
-  "name": "zotero-plugin-template",
+  "name": "zotero-plugin-dropdown",
   "type": "module",
-  "version": "3.1.0",
-  "description": "Zotero Plugin Template",
+  "version": "0.0.1",
+  "description": "Zotero Collection Dropdown",
   "config": {
-    "addonName": "Zotero Plugin Template",
-    "addonID": "addontemplate@euclpts.com",
-    "addonRef": "addontemplate",
-    "addonInstance": "AddonTemplate",
-    "prefsPrefix": "extensions.zotero.addontemplate"
+    "addonName": "Zotero Collection Dropdown",
+    "addonID": "ZoteroDropdown@tabirstrees.top",
+    "addonRef": "cdrop",
+    "addonInstance": "collectionDropdown",
+    "prefsPrefix": "extensions.zotero.cdrop"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/windingwind/zotero-plugin-template.git"
+    "url": "git+https://github.com/tabris-trees/zotero-plugin-dropdown.git"
   },
-  "author": "windingwind",
+  "author": "tabris trees",
   "bugs": {
-    "url": "https://github.com/windingwind/zotero-plugin-template/issues"
+    "url": "https://github.com/tabris-trees/zotero-plugin-dropdown/issues"
   },
-  "homepage": "https://github.com/windingwind/zotero-plugin-template#readme",
+  "homepage": "https://github.com/tabris-trees/zotero-plugin-dropdown#readme",
   "license": "AGPL-3.0-or-later",
   "scripts": {
     "start": "zotero-plugin serve",

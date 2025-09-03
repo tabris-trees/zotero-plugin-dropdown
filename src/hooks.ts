@@ -8,182 +8,121 @@ import {
 import { getString, initLocale } from "./utils/locale";
 import { registerPrefsScripts } from "./modules/preferenceScript";
 import { createZToolkit } from "./utils/ztoolkit";
+import { mountDropdown, unmountDropdown } from "./modules/dropdown";
 
-async function onStartup() {
-  await Promise.all([
-    Zotero.initializationPromise,
-    Zotero.unlockPromise,
-    Zotero.uiReadyPromise,
-  ]);
+export async function onStartup(): Promise<void> {
+  const z = Zotero as any;
+
+  // 等待 Zotero / UI 就绪（存在的才等，避免 undefined）
+  const waits: Promise<any>[] = [];
+  if (z.initializationPromise) waits.push(z.initializationPromise);
+  if (z.unlockPromise) waits.push(z.unlockPromise);
+  if (z.uiReadyPromise) waits.push(z.uiReadyPromise);
+  if (z.ui?.ready) waits.push(z.ui.ready);
+  if (waits.length) {
+    try { await Promise.all(waits); } catch { }
+  }
 
   initLocale();
-
   BasicExampleFactory.registerPrefs();
-
   BasicExampleFactory.registerNotifier();
-
   KeyExampleFactory.registerShortcuts();
-
   await UIExampleFactory.registerExtraColumn();
-
   await UIExampleFactory.registerExtraColumnWithCustomCell();
-
   UIExampleFactory.registerItemPaneCustomInfoRow();
-
   UIExampleFactory.registerItemPaneSection();
-
   UIExampleFactory.registerReaderItemPaneSection();
 
+  // 对“当前已打开”的所有主窗口做挂载
   await Promise.all(
-    Zotero.getMainWindows().map((win) => onMainWindowLoad(win)),
+    Zotero.getMainWindows().map((win: _ZoteroTypes.MainWindow) => onMainWindowLoad(win))
   );
 
-  // Mark initialized as true to confirm plugin loading status
-  // outside of the plugin (e.g. scaffold testing process)
   addon.data.initialized = true;
 }
 
-async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
-  // Create ztoolkit for every window
+export async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
   addon.data.ztoolkit = createZToolkit();
 
-  win.MozXULElement.insertFTLIfNeeded(
-    `${addon.data.config.addonRef}-mainWindow.ftl`,
-  );
+  win.MozXULElement.insertFTLIfNeeded(`${addon.data.config.addonRef}-mainWindow.ftl`);
 
   const popupWin = new ztoolkit.ProgressWindow(addon.data.config.addonName, {
     closeOnClick: true,
     closeTime: -1,
   })
-    .createLine({
-      text: getString("startup-begin"),
-      type: "default",
-      progress: 0,
-    })
+    .createLine({ text: getString("startup-begin"), type: "default", progress: 0 })
     .show();
 
   await Zotero.Promise.delay(1000);
-  popupWin.changeLine({
-    progress: 30,
-    text: `[30%] ${getString("startup-begin")}`,
-  });
+  popupWin.changeLine({ progress: 30, text: `[30%] ${getString("startup-begin")}` });
 
   UIExampleFactory.registerStyleSheet(win);
-
   UIExampleFactory.registerRightClickMenuItem();
-
   UIExampleFactory.registerRightClickMenuPopup(win);
-
   UIExampleFactory.registerWindowMenuWithSeparator();
-
   PromptExampleFactory.registerNormalCommandExample();
-
   PromptExampleFactory.registerAnonymousCommandExample(win);
-
   PromptExampleFactory.registerConditionalCommandExample();
 
-  await Zotero.Promise.delay(1000);
+  // ★ 在窗口里挂载“集合下拉”
+  try { unmountDropdown(win); } catch { }
+  await mountDropdown(win);
 
-  popupWin.changeLine({
-    progress: 100,
-    text: `[100%] ${getString("startup-finish")}`,
-  });
+  await Zotero.Promise.delay(1000);
+  popupWin.changeLine({ progress: 100, text: `[100%] ${getString("startup-finish")}` });
   popupWin.startCloseTimer(5000);
 
   addon.hooks.onDialogEvents("dialogExample");
 }
 
-async function onMainWindowUnload(win: Window): Promise<void> {
+export async function onMainWindowUnload(win: _ZoteroTypes.MainWindow): Promise<void> {
+  unmountDropdown(win);            // 只对这个窗口清理
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
 }
 
-function onShutdown(): void {
+export function onShutdown(): void {
+  // 兜底：对所有已存在窗口清理一次
+  for (const w of Zotero.getMainWindows()) {
+    try { unmountDropdown(w as _ZoteroTypes.MainWindow); } catch { }
+  }
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
-  // Remove addon object
   addon.data.alive = false;
   // @ts-expect-error - Plugin instance is not typed
-  delete Zotero[addon.data.config.addonInstance];
+  delete (Zotero as any)[addon.data.config.addonInstance];
 }
 
-/**
- * This function is just an example of dispatcher for Notify events.
- * Any operations should be placed in a function to keep this funcion clear.
- */
-async function onNotify(
+export async function onNotify(
   event: string,
   type: string,
   ids: Array<string | number>,
   extraData: { [key: string]: any },
 ) {
-  // You can add your code to the corresponding notify type
   ztoolkit.log("notify", event, type, ids, extraData);
-  if (
-    event == "select" &&
-    type == "tab" &&
-    extraData[ids[0]].type == "reader"
-  ) {
+  if (event === "select" && type === "tab" && extraData[ids[0]].type === "reader") {
     BasicExampleFactory.exampleNotifierCallback();
-  } else {
-    return;
   }
 }
 
-/**
- * This function is just an example of dispatcher for Preference UI events.
- * Any operations should be placed in a function to keep this funcion clear.
- * @param type event type
- * @param data event data
- */
-async function onPrefsEvent(type: string, data: { [key: string]: any }) {
+export async function onPrefsEvent(type: string, data: { [key: string]: any }) {
+  if (type === "load") registerPrefsScripts(data.window);
+}
+
+export function onShortcuts(type: string) {
+  if (type === "larger") KeyExampleFactory.exampleShortcutLargerCallback();
+  else if (type === "smaller") KeyExampleFactory.exampleShortcutSmallerCallback();
+}
+
+export function onDialogEvents(type: string) {
   switch (type) {
-    case "load":
-      registerPrefsScripts(data.window);
-      break;
-    default:
-      return;
+    case "dialogExample": HelperExampleFactory.dialogExample(); break;
+    case "clipboardExample": HelperExampleFactory.clipboardExample(); break;
+    case "filePickerExample": HelperExampleFactory.filePickerExample(); break;
+    case "progressWindowExample": HelperExampleFactory.progressWindowExample(); break;
+    case "vtableExample": HelperExampleFactory.vtableExample(); break;
   }
 }
-
-function onShortcuts(type: string) {
-  switch (type) {
-    case "larger":
-      KeyExampleFactory.exampleShortcutLargerCallback();
-      break;
-    case "smaller":
-      KeyExampleFactory.exampleShortcutSmallerCallback();
-      break;
-    default:
-      break;
-  }
-}
-
-function onDialogEvents(type: string) {
-  switch (type) {
-    case "dialogExample":
-      HelperExampleFactory.dialogExample();
-      break;
-    case "clipboardExample":
-      HelperExampleFactory.clipboardExample();
-      break;
-    case "filePickerExample":
-      HelperExampleFactory.filePickerExample();
-      break;
-    case "progressWindowExample":
-      HelperExampleFactory.progressWindowExample();
-      break;
-    case "vtableExample":
-      HelperExampleFactory.vtableExample();
-      break;
-    default:
-      break;
-  }
-}
-
-// Add your hooks here. For element click, etc.
-// Keep in mind hooks only do dispatch. Don't add code that does real jobs in hooks.
-// Otherwise the code would be hard to read and maintain.
 
 export default {
   onStartup,
