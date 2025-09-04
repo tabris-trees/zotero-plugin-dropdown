@@ -64,55 +64,90 @@ async function diagnoseTree(win: any, pane: any, hintID: any, hintKey?: string, 
 
 
 // 取集合并生成“路径”，全部走当前窗口的 Zotero（更稳）
+// async function getCollections(win: any) {
+//     const { Zotero } = win;
+
+//     // 用“当前选中库”为主，退化到 userLibraryID
+//     let libID: number | undefined;
+//     try { libID = Number(Zotero.getActiveZoteroPane()?.getSelectedLibraryID?.()); } catch { }
+//     if (!Number.isFinite(libID)) libID = Number(Zotero.Libraries?.userLibraryID);
+
+//     let rows: Array<{ id: number | string; parentID?: number | string; name: string }> = [];
+
+//     try {
+//         const cols = await Zotero.Collections.getByLibrary(libID);
+//         rows = cols.map((c: any) => ({
+//             id: c.id ?? c.collectionID,      // 有的构建可能是字符串
+//             parentID: c.parentID ?? c.parent,
+//             name: c.name,
+//         }));
+//     } catch {
+//         const sql = `SELECT collectionID AS id, parentID, name FROM collections WHERE libraryID = ?`;
+//         rows = (await Zotero.DB.queryAsync(sql, [libID])) as any;
+//     }
+
+//     // ✅ 只在确实是数字时才转 number，否则保留原值，避免 NaN
+//     const maybeNum = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : String(v));
+
+//     rows = rows.map(r => ({
+//         id: maybeNum(r.id),
+//         parentID: r.parentID != null ? maybeNum(r.parentID) : undefined,
+//         name: String(r.name ?? '')
+//     }))
+//         .filter(r => r.id !== undefined && r.id !== null && r.id !== '');
+
+//     // 你的“构树 + DFS → path”逻辑保持不变
+//     const byId = new Map(rows.map(r => [r.id, { ...r, children: [] as any[] }]));
+//     const roots: any[] = [];
+//     for (const r of byId.values()) {
+//         if (r.parentID != null && byId.has(r.parentID)) byId.get(r.parentID)!.children.push(r);
+//         else roots.push(r);
+//     }
+//     const list: Array<{ id: any; path: string }> = [];
+//     (function dfs(ns: any[], prefix: string) {
+//         for (const n of ns) {
+//             const p = prefix ? `${prefix} / ${n.name}` : n.name;
+//             list.push({ id: n.id, path: p });
+//             if (n.children.length) dfs(n.children, p);
+//         }
+//     })(roots, "");
+//     return list.sort((a, b) => a.path.localeCompare(b.path));
+// }
+
+// 一把取全库所有集合（含子集合），并生成“A / B / C”路径
 async function getCollections(win: any) {
     const { Zotero } = win;
 
-    // 用“当前选中库”为主，退化到 userLibraryID
-    let libID: number | undefined;
-    try { libID = Number(Zotero.getActiveZoteroPane()?.getSelectedLibraryID?.()); } catch { }
-    if (!Number.isFinite(libID)) libID = Number(Zotero.Libraries?.userLibraryID);
-
-    let rows: Array<{ id: number | string; parentID?: number | string; name: string }> = [];
-
-    try {
-        const cols = await Zotero.Collections.getByLibrary(libID);
-        rows = cols.map((c: any) => ({
-            id: c.id ?? c.collectionID,      // 有的构建可能是字符串
-            parentID: c.parentID ?? c.parent,
-            name: c.name,
-        }));
-    } catch {
-        const sql = `SELECT collectionID AS id, parentID, name FROM collections WHERE libraryID = ?`;
-        rows = (await Zotero.DB.queryAsync(sql, [libID])) as any;
+    // 等待 Zotero 完全就绪，避免 ensureLoaded 报错
+    await Zotero.initializationPromise;               // ✅ 官方建议
+    if (Zotero.Schema?.schemaUpdatePromise) {
+        await Zotero.Schema.schemaUpdatePromise.catch(() => { });
     }
 
-    // ✅ 只在确实是数字时才转 number，否则保留原值，避免 NaN
-    const maybeNum = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : String(v));
+    // 当前选中库，取不到就回退到用户库
+    let libID = Number(Zotero.getActiveZoteroPane()?.getSelectedLibraryID?.());
+    if (!Number.isFinite(libID)) libID = Zotero.Libraries.userLibraryID;
 
-    rows = rows.map(r => ({
-        id: maybeNum(r.id),
-        parentID: r.parentID != null ? maybeNum(r.parentID) : undefined,
-        name: String(r.name ?? '')
-    }))
-        .filter(r => r.id !== undefined && r.id !== null && r.id !== '');
+    // 关键：第二个参数传 true → 递归拿到所有（含子集合）
+    const cols = Zotero.Collections.getByLibrary(libID, true); // 返回数组
 
-    // 你的“构树 + DFS → path”逻辑保持不变
-    const byId = new Map(rows.map(r => [r.id, { ...r, children: [] as any[] }]));
-    const roots: any[] = [];
-    for (const r of byId.values()) {
-        if (r.parentID != null && byId.has(r.parentID)) byId.get(r.parentID)!.children.push(r);
-        else roots.push(r);
-    }
-    const list: Array<{ id: any; path: string }> = [];
-    (function dfs(ns: any[], prefix: string) {
-        for (const n of ns) {
-            const p = prefix ? `${prefix} / ${n.name}` : n.name;
-            list.push({ id: n.id, path: p });
-            if (n.children.length) dfs(n.children, p);
+    // 逐个向上追父节点，拼出完整路径
+    const list = cols.map((c: any) => {
+        const names = [c.name];
+        let p = c.parentID ? Zotero.Collections.get(c.parentID) : null;
+        while (p) {
+            names.unshift(p.name);
+            p = p.parentID ? Zotero.Collections.get(p.parentID) : null;
         }
-    })(roots, "");
-    return list.sort((a, b) => a.path.localeCompare(b.path));
+        return { id: c.id, key: c.key, path: names.join(' / ') };
+    });
+
+    // 路径排序，便于下拉展示
+    return list.sort((a: any, b: any) =>
+        a.path.localeCompare(b.path, undefined, { sensitivity: 'base', numeric: true })
+    );
 }
+
 
 
 
@@ -225,6 +260,7 @@ export async function mountDropdown(win: Window) {
                 const opt = list.options[list.selectedIndex];
                 if (!opt) return;
                 const raw = String(opt?.dataset?.id ?? opt?.value ?? '').trim();
+                dlog(win, `[cdrop] go(): raw="${raw}" text="${opt?.textContent ?? ''}" → ${describe(raw)}`);
                 const id = Number(raw);
                 if (!Number.isFinite(id)) {
                     (win as any).Zotero?.debug?.(`[cdrop] go(): invalid option id raw="${raw}" text="${opt?.textContent ?? ''}"`);
