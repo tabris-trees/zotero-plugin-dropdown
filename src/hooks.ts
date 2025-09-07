@@ -89,7 +89,6 @@ export function onShutdown(): void {
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
   addon.data.alive = false;
-  // @ts-expect-error - Plugin instance is not typed
   delete (Zotero as any)[addon.data.config.addonInstance];
 }
 

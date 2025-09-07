@@ -1,12 +1,15 @@
 // === Collection Dropdown (per-window safe version) ===
 
+// setting parameters
+const treeNavEnabled = true;    // 是否启用二级目录导航功能
+
 // 每个窗口维护一份节点与事件句柄
 type Nodes = {
     style: HTMLStyleElement;
     btn: HTMLButtonElement;
     panel: HTMLDivElement;
     onDocMouseDown: (e: MouseEvent) => void;
-    onBtnClick: () => void;
+    onBtnClick: (e: MouseEvent) => void;
 };
 const nodeRegistry = new WeakMap<Window, Nodes>();
 
@@ -16,12 +19,13 @@ function sleep(ms: number) { return new Promise<void>(r => setTimeout(r, ms)); }
 // 统一写日志到 Zotero Debug 和临时文件
 function dlog(win: any, msg: string) {
     try { win.Zotero?.debug?.(msg); } catch { }
-    try {
-        const p = win.Zotero.getTempDirectory().path + '/zotero-collection-debug.log';
-        const t = new Date().toISOString();
-        win.Zotero.File.putContents(p, `[${t}] ${msg}\n`, { append: true });
-        win.Zotero?.debug?.(`[cdrop] log to ${p}`);
-    } catch { }
+    // try {
+    //     const p = win.Zotero.getTempDirectory().path + '\\zotero-collection-debug.log';
+    //     const t = new Date().toISOString();
+    //     const file = win.Zotero.File.pathToFile(p);
+    //     win.Zotero.File.putContents(file, `[${t}] ${msg}\n`, { append: true });
+    //     win.Zotero?.debug?.(`[cdrop] log to ${p}`);
+    // } catch { }
 }
 
 // 把任意值描述成字符串（便于看出类型/是否可转为数字）
@@ -259,7 +263,7 @@ export async function mountDropdown(win: Window) {
             const go = async () => {
                 const opt = list.options[list.selectedIndex];
                 if (!opt) return;
-                const raw = String(opt?.dataset?.id ?? opt?.value ?? '').trim();
+                const raw = String((opt as HTMLOptionElement)?.dataset?.id ?? (opt as HTMLOptionElement)?.value ?? '').trim();
                 dlog(win, `[cdrop] go(): raw="${raw}" text="${opt?.textContent ?? ''}" → ${describe(raw)}`);
                 const id = Number(raw);
                 if (!Number.isFinite(id)) {
@@ -271,7 +275,7 @@ export async function mountDropdown(win: Window) {
                 panel.classList.remove("show");
             };
             list.addEventListener("dblclick", () => void go());
-            list.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); void go(); } });
+            list.addEventListener("keydown", (e: KeyboardEvent) => { if (e.key === "Enter") { e.preventDefault(); void go(); } });
 
             loaded = true;
             Zotero.debug?.(`[cdrop] loaded ${all.length} collections`);
@@ -316,6 +320,14 @@ export async function mountDropdown(win: Window) {
         onBtnClick,
     });
     Zotero.debug?.("[cdrop] mount: inserted at #zotero-title-bar (first child)");
+
+    // ===== 安装二级目录功能 =====
+    if (!treeNavEnabled) return;
+    try {
+        await cdropInstallTreeNav(win);
+    } catch (e) {
+        dlog(win, '[cdrop] cdropInstallTreeNav error');
+    }
 }
 
 
@@ -371,6 +383,7 @@ async function jumpToCollection(win: any, spec: number | string | { id?: number 
             }
             // 部分环境没有 URI.select，但可以“打开链接”
             if (typeof Zotero.launchURL === 'function') {
+                dlog(win, `[cdrop] jump: launchURL -> ${uri}`);
                 win.location.href = uri;
                 // reference:
                 // https://forums.zotero.org/discussion/78312/zotero-uri-vs-select-item
@@ -378,92 +391,14 @@ async function jumpToCollection(win: any, spec: number | string | { id?: number 
                 return;
             }
         } catch (e: any) {
-            dlog(win, `[cdrop] jump: URI route failed: ${e?.message || e}`);
+            dlog(win, `[cdrop] jump: some error has been reported: ${e?.message || e}`);
+            return;
         }
 
-        // 4) 次选：面板 API（多数构建可用，能触发中栏刷新）
-        try { pane.selectLibrary?.(libID); } catch { }
-        // 等视图 ready 一下
-        await new Promise(r => setTimeout(r, 50));
-
-        if (typeof pane.selectCollection === 'function' && Number.isFinite(realID)) {
-            try {
-                pane.selectCollection(realID);
-                dlog(win, `[cdrop] jump: pane.selectCollection(${realID}) OK`);
-                return;
-            } catch (e: any) {
-                dlog(win, `[cdrop] jump: pane.selectCollection failed: ${e?.message || e}`);
-            }
-        } else {
-            dlog(win, `[cdrop] jump: pane.selectCollection not available!!!`);
-        }
-
-        // 5) 兜底：视图层（可能只高亮，不触发回调；因此额外“人工触发”一次 select 事件）
-        const view: any = pane?.collectionsView;
-        const tree: any = (view && (view._tree || view.tree)) || win.document.getElementById('zotero-collections-tree');
-
-        if (view && typeof view.selectByID === 'function' && Number.isFinite(realID)) {
-            try {
-                // 1) 选中左侧树里的该集合
-                view.selectByID(realID, true, true);
-
-                // 2) 找到“真正的”树 DOM 节点（不要用 view._tree）
-                const doc = (view as any)?._ownerDocument || win.document; // ← 关键：用 ownerDocument 更稳
-                const treeEl = doc.getElementById('zotero-collections-tree') as any;
-
-                // 3) 尝试触发选择联动
-                if (treeEl && typeof treeEl.dispatchEvent === 'function') {
-                    try {
-                        // 聚焦一下，让 UI 知道变化
-                        treeEl.focus?.();
-
-                        const Ev = doc.defaultView?.Event || win.Event;
-                        const evt = new Ev('select', { bubbles: true });
-                        treeEl.dispatchEvent(evt);
-                    } catch { }
-                } else {
-                    // 退一步：有些构建把处理器挂在 view 上
-                    try { (view as any).onSelect?.(); } catch { }
-                    try { (view as any).selectionChanged?.(); } catch { }
-                }
-
-                dlog(win, `[cdrop] jump: view.selectByID(${realID}) + dispatch(select via DOM)`);
-                return;
-            } catch (e: any) {
-                dlog(win, `[cdrop] jump: view.selectByID failed: ${e?.message || e}`);
-            }
-        }
-
-
-        // 6) 最后再做一次树行兜底（只在 realID 是有限数字时）
-        if (Number.isFinite(realID)) {
-            try { view?.expandToID?.(realID); } catch { }
-            let row = -1;
-            try {
-                if (typeof view?.getRowIndexByID === 'function') row = Number(view.getRowIndexByID(realID));
-                else if (typeof tree?.view?.getRowIndexByID === 'function') row = Number(tree.view.getRowIndexByID(realID));
-            } catch { }
-            if (row >= 0 && tree?.view?.selection) {
-                try {
-                    tree.view.selection.select(row);
-                    tree.ensureRowIsVisible?.(row);
-                    // 再人工触发一次 select
-                    try { tree?.dispatchEvent?.(new win.Event('select', { bubbles: true })); } catch { }
-                    dlog(win, `[cdrop] jump: tree.select row=${row} id=${realID} + dispatch(select)`);
-                    return;
-                } catch (e: any) {
-                    dlog(win, `[cdrop] jump: tree.select failed: ${e?.message || e}`);
-                }
-            }
-        }
-
-        dlog(win, `[cdrop] jump: all routes failed (id=${String(id)}, key=${cKey})`);
     } catch (e: any) {
         dlog(win, '[cdrop] jump error: ' + (e?.stack || e));
     }
 }
-
-
 
 
 // === REPLACE ENTIRE FUNCTION ===
@@ -475,7 +410,7 @@ async function go(win: any, selectEl: HTMLSelectElement) {
         const opt = selectEl.options?.[selectEl.selectedIndex];
         if (!opt) { dlog(win, '[cdrop] go(): no selected option'); return; }
 
-        const raw = String((opt as any)?.dataset?.id ?? opt.value ?? '').trim();
+        const raw = String((opt as HTMLOptionElement)?.dataset?.id ?? (opt as HTMLOptionElement).value ?? '').trim();
         dlog(win, `[cdrop] go(): raw="${raw}" text="${opt.textContent?.trim() || ''}" → ${describe(raw)}`);
 
         const parsed = Number(raw);
@@ -503,4 +438,243 @@ export function unmountDropdown(win: Window) {
     nodes.panel.remove();
 
     nodeRegistry.delete(win);
+}
+
+/* ============================================
+ * cdrop: Tree Navigation Add-on (Non-invasive)
+ * 说明：
+ * - 这是附加功能模块，不替换你原有的列表逻辑
+ * - 只在面板出现时渲染一个树状视图（多级导航）
+ * - 不改变现有 DOM，只是追加一个 #cdrop-tree 容器
+ * - 所有新 DOM/CSS 节点用独立 id，避免冲突
+ * ============================================ */
+
+async function cdropInstallTreeNav(win: any) {                 // 新增一个安装函数：只做“树状导航”的挂载
+    const d = win.document as Document;                           // 取窗口文档，供 DOM 操作
+    const Zotero: any = (win as any).Zotero;                      // 取 Zotero 句柄，读取集合层次
+
+    // ---- 1) 注入仅供树视图使用的样式（一次性）----
+    // —— 树状样式：竖排、层级缩进、折叠箭头、引导线 ——
+    // 只影响 #cdrop-tree 作用域内的元素，不会动到你的其他面板样式
+    function ensureTreeNavStyle() {
+        const css = `
+  #cdrop-tree{
+    height:320px;overflow:auto;padding:6px 8px;box-sizing:border-box;
+    font-size:12px;line-height:1.5;
+  }
+  /* 统一可点击节点的块级表现与内边距 */
+  #cdrop-tree .cdrop-node{
+    display:block; position:relative; padding:3px 8px; border-radius:6px;
+    cursor:pointer; user-select:none; outline:none;
+  }
+  #cdrop-tree .cdrop-node:hover,#cdrop-tree .cdrop-node:focus{
+    background: color-mix(in srgb, CanvasText 10%, Canvas 90%);
+  }
+
+  /* 父节点：用 <details>/<summary>，加箭头 */
+  #cdrop-tree details{ margin: 2px 0 2px .25rem; }
+  #cdrop-tree summary.cdrop-node{ font-weight:600; }
+  #cdrop-tree summary.cdrop-node::before{
+    content:"▸"; display:inline-block; width:1em; margin-right:.25em;
+    transform: translateY(-.5px);
+  }
+  #cdrop-tree details[open] > summary.cdrop-node::before{
+    transform: rotate(90deg) translateX(.1em);
+  }
+
+  /* 子层容器：竖线+缩进，形成树感 */
+  #cdrop-tree .cdrop-children{
+    margin-left: .75rem; padding-left: .75rem;
+    border-left: 1px solid color-mix(in srgb, CanvasText 20%, Canvas 80%);
+  }
+
+  /* 叶子节点：和父节点统一风格，但不显示箭头 */
+  #cdrop-tree .cdrop-leaf{ margin: 2px 0 2px 1.25rem; }
+
+  /* 可选：长名换行，避免挤成一行 */
+  #cdrop-tree .cdrop-node{
+    white-space: normal; word-break: break-word;
+  }
+  `;
+        let s = d.getElementById('cdrop-style-tree') as HTMLStyleElement | null;
+        if (!s) {
+            s = d.createElement('style');
+            s.id = 'cdrop-style-tree';
+            (d.documentElement || d.body)?.appendChild(s);
+        }
+        s.textContent = css;
+    }
+
+
+    // ---- 2) 构建 parentID -> children 的索引（一次 O(N)）----
+    // 用 parentCollection（父集合的 key）而不是 parentID（数字）
+    // key: string | null 作为 Map 的键；value: 原始 collection 对象数组
+    async function buildParentIndex(): Promise<Map<string | null, any[]>> {
+        const Zot = (Zotero as any);
+
+        await Zot.initializationPromise;
+        if (Zot.Schema?.schemaUpdatePromise) { try { await Zot.Schema.schemaUpdatePromise; } catch { } }
+
+        // 当前库 ID（多重兜底可按需保留/精简）
+        const pane = Zot.getActiveZoteroPane?.();
+        let libID: number | null = Number(pane?.getSelectedLibraryID?.());
+        if (!Number.isFinite(libID)) libID = Zot.Libraries?.userLibraryID;
+
+        // 取集合：集合对象里没有 parentID，只有 parentCollection（父 key 或 false）
+        const cols: any[] = Zot.Collections?.getByLibrary?.(libID, true) || [];
+
+        const byParent = new Map<string | null, any[]>();
+        for (const c of cols) {
+            // 顶层：parentCollection === false；否则是父集合的 key（string）
+            const pkey: string | null =
+                (c?.parentKey && typeof c.parentKey === "string")
+                    ? c.parentKey
+                    : null;
+
+            dlog(win, `[cdrop] buildParentIndex: key=${describe(c?.key)} parentKey=${describe(pkey)}`);
+
+            const arr = byParent.get(pkey) || [];
+            arr.push(c);
+            byParent.set(pkey, arr);
+        }
+
+        // 同层按名称排序
+        for (const arr of byParent.values()) {
+            arr.sort((a: any, b: any) => String(a?.name || '').localeCompare(String(b?.name || '')));
+        }
+
+        return byParent;
+    }
+
+    // ---- 3) 渲染树视图（<details>/<summary> 原生多级展开）----
+    function renderTree(container: HTMLElement, byParent: Map<string | null, any[]>) {
+        container.textContent = '';
+
+        const roots = byParent.get(null) || [];
+        if (roots.length === 0) {
+            const em = d.createElement('div');
+            em.className = 'cdrop-empty';
+            em.textContent = '（此库暂无集合）';
+            container.appendChild(em);
+            return;
+        }
+
+        // 跳转：沿用你已有的统一入口
+        const goto = async (col: any) => {
+            const spec = typeof col?.id === 'number' && Number.isFinite(col.id)
+                ? col.id
+                : String(col?.key ?? '');
+            await jumpToCollection(win, spec);
+            d.getElementById('cdrop-panel')?.classList?.remove('show');
+        };
+
+        const mkLeaf = (col: any, depth: number) => {
+            const leaf = d.createElement('div');
+            leaf.className = 'cdrop-node cdrop-leaf';
+            leaf.tabIndex = 0;
+            leaf.textContent = col?.name ?? '';
+            // 交互：双击 / 回车
+            leaf.addEventListener('dblclick', () => { void goto(col); });
+            leaf.addEventListener('keydown', (e: KeyboardEvent) => {
+                if ((e as KeyboardEvent).key === 'Enter') { e.preventDefault(); void goto(col); }
+            });
+            return leaf;
+        };
+
+        const mkBranch = (col: any, depth: number): HTMLElement => {
+            const kids = byParent.get(String(col?.key)) || byParent.get(Number(col?.id) as any) || [];
+            if (!kids.length) return mkLeaf(col, depth);
+
+            const det = d.createElement('details');
+            det.className = 'cdrop-branch';
+
+            const sum = d.createElement('summary');
+            sum.className = 'cdrop-node';
+            sum.tabIndex = 0;
+            sum.textContent = col?.name ?? '';
+            // 父节点也可直接跳转
+            sum.addEventListener('dblclick', (e) => { e.preventDefault(); void goto(col); });
+            sum.addEventListener('keydown', (e) => {
+                if ((e as KeyboardEvent).key === 'Enter') { e.preventDefault(); void goto(col); }
+            });
+            det.appendChild(sum);
+
+            const wrap = d.createElement('div');
+            wrap.className = 'cdrop-children';
+            for (const k of kids) wrap.appendChild(mkBranch(k, depth + 1));
+            det.appendChild(wrap);
+
+            return det;
+        };
+
+        const root = d.createElement('div');
+        for (const r of roots) root.appendChild(mkBranch(r, 0));
+        container.appendChild(root);
+    }
+
+
+    // ---- 4) 在面板出现时创建树容器并渲染（不影响原列表）----
+    async function mountTreeOnce() {                               // 只在面板出现/刷新时调用，避免重复插入
+        ensureTreeNavStyle();                                        // 确保样式到位
+
+        const panel = d.getElementById('cdrop-panel');               // 你的面板容器（现有 DOM）
+        if (!panel) return;                                          // 此刻未创建则直接返回（由观察器再次触发）
+
+        const oldList = d.getElementById('cdrop-list');
+        if (oldList) oldList.remove();                           // 移除你原有的列表，避免冲突
+
+        let tree = d.getElementById('cdrop-tree') as HTMLElement | null; // 复用已有树容器，避免重复创建
+        if (!tree) {
+            tree = d.createElement('div');                             // 第一次创建树容器
+            tree.id = 'cdrop-tree';
+            panel.appendChild(tree);                                   // 追加到面板末尾，不影响你原有列表
+        }
+
+        const byParent = await buildParentIndex();                   // 获取当前库的层次结构
+        renderTree(tree, byParent);                                  // 渲染树
+    }
+
+    // ---- 5) 监听面板出现：首次就装载树（只新增观察，不改你原按钮逻辑）----
+    const btn = d.getElementById('cdrop-btn-titlebar');            // 复用你现有的“打开面板”按钮
+    btn?.addEventListener('click', () => {                         // 点击后开始等待面板节点出现
+        const wait = () => {
+            const panel = d.getElementById('cdrop-panel');             // 面板通常是点击后才创建/显示
+            if (panel) {
+                dlog(win, '[cdrop] panel appeared, installing tree nav…');
+                if (panel.classList.contains('show')) { void mountTreeOnce(); } // 若已显示，立即装载树
+                const mo = new MutationObserver(muts => {                // 监听面板 class 变化（出现 .show 时装载）
+                    for (const m of muts) {
+                        if (
+                            m.type === 'attributes' &&
+                            (m.target as HTMLElement).id === 'cdrop-panel' &&
+                            (m.target as HTMLElement).classList.contains('show')
+                        ) {
+                            void mountTreeOnce();                              // 出现时装一次
+                        }
+                    }
+                });
+                mo.observe(panel, { attributes: true, attributeFilter: ['class'] }); // 只关心 class 改变，减小开销
+            } else {
+                setTimeout(wait, 16); // 使用 setTimeout 替代 requestAnimationFrame，轻量轮询下一帧
+            }
+        };
+        setTimeout(wait, 16); // 等待一帧给主题时间生成 DOM
+    }, { capture: true });                                         // capture: true 保证在面板内部自己的监听之前执行
+
+    // ---- 6) 可选：集合变化时，若面板打开则重绘树（保持实时）----
+    try {
+        Zotero.Notifier.registerObserver({                           // 监听集合增删改事件
+            notify: async (event: string, type: string) => {
+                if (type === 'collection' && (event === 'add' || event === 'modify' || event === 'delete')) {
+                    const panel = d.getElementById('cdrop-panel');
+                    if (panel?.classList?.contains('show')) await mountTreeOnce(); // 面板可见时才重绘，避免无谓开销
+                }
+            },
+        }, ['collection'], 'cdrop-tree-observer');                   // 用唯一名称注册，方便将来反注册
+    } catch { }                                                     // 环境异常（如早期版本）下忽略，不影响主流程
+
+    // ---- 7) 兼容：若启动时面板恰好已显示（少数主题），立即装载一次 ----
+    if (d.getElementById('cdrop-panel')?.classList?.contains('show')) {
+        await mountTreeOnce();                                       // 确保首次就有树
+    }
 }
