@@ -1,7 +1,7 @@
 {
   "name": "zotero-plugin-dropdown",
   "type": "module",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "Zotero Collection Dropdown",
   "config": {
     "addonName": "Zotero Collection Dropdown",
