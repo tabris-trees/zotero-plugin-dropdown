@@ -1,7 +1,9 @@
 // === Collection Dropdown (per-window safe version) ===
 
 // setting parameters
-const treeNavEnabled = true;    // 是否启用二级目录导航功能
+// const treeNavEnabled = true;    // 是否启用二级目录导航功能
+import { getEnableTreePane, getPanelHeight } from "../utils/prefs";
+import { startPrefObserver, stopPrefObserver } from "./prefObserver";
 
 // 每个窗口维护一份节点与事件句柄
 type Nodes = {
@@ -34,89 +36,6 @@ function describe(val: any) {
     return `val=${String(val)} type=${typeof val} num=${String(n)} finite=${Number.isFinite(n)}`;
 }
 
-// 扫描左侧集合树，打印前 N 行的 “行ID” 情况，帮助定位为什么会出现 NaN
-async function diagnoseTree(win: any, pane: any, hintID: any, hintKey?: string, maxRows = 60) {
-    const view: any = pane?.collectionsView;
-    const tree: any = (view && (view._tree || view.tree)) || win.document.getElementById('zotero-collections-tree');
-    const tv: any = tree?.view;
-
-    const rowCount = Number(tv?.rowCount ?? 0) >>> 0;
-    dlog(win, `[cdrop][diag] rowCount=${rowCount} hintID=${describe(hintID)} hintKey=${hintKey ?? ''}`);
-
-    const N = Math.min(rowCount, maxRows);
-    for (let i = 0; i < N; i++) {
-        let got: any = undefined;
-        try {
-            got = tv.getIDForIndex?.(i) ?? tv.getItemAtIndex?.(i) ?? tv.getItemAtRow?.(i);
-        } catch (e: any) {
-            dlog(win, `[cdrop][diag] i=${i} getID error: ${e?.message || e}`);
-            continue;
-        }
-        dlog(win, `[cdrop][diag] i=${i} id=${describe(got)}`);
-    }
-}
-
-// // 生成log文件
-// function dlog(win: any, msg: string) {
-//     try {
-//         const path = win.Zotero.getTempDirectory().path + '/zotero-collection-debug.log';
-//         const stamp = new Date().toISOString();
-//         win.Zotero.File.putContents(path, `[${stamp}] ${msg}\n`, { append: true });
-//         Zotero.debug?.(`[cdrop] log to ${path}: ${msg}`);
-//     } catch (_) { }
-// }
-
-
-// 取集合并生成“路径”，全部走当前窗口的 Zotero（更稳）
-// async function getCollections(win: any) {
-//     const { Zotero } = win;
-
-//     // 用“当前选中库”为主，退化到 userLibraryID
-//     let libID: number | undefined;
-//     try { libID = Number(Zotero.getActiveZoteroPane()?.getSelectedLibraryID?.()); } catch { }
-//     if (!Number.isFinite(libID)) libID = Number(Zotero.Libraries?.userLibraryID);
-
-//     let rows: Array<{ id: number | string; parentID?: number | string; name: string }> = [];
-
-//     try {
-//         const cols = await Zotero.Collections.getByLibrary(libID);
-//         rows = cols.map((c: any) => ({
-//             id: c.id ?? c.collectionID,      // 有的构建可能是字符串
-//             parentID: c.parentID ?? c.parent,
-//             name: c.name,
-//         }));
-//     } catch {
-//         const sql = `SELECT collectionID AS id, parentID, name FROM collections WHERE libraryID = ?`;
-//         rows = (await Zotero.DB.queryAsync(sql, [libID])) as any;
-//     }
-
-//     // ✅ 只在确实是数字时才转 number，否则保留原值，避免 NaN
-//     const maybeNum = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : String(v));
-
-//     rows = rows.map(r => ({
-//         id: maybeNum(r.id),
-//         parentID: r.parentID != null ? maybeNum(r.parentID) : undefined,
-//         name: String(r.name ?? '')
-//     }))
-//         .filter(r => r.id !== undefined && r.id !== null && r.id !== '');
-
-//     // 你的“构树 + DFS → path”逻辑保持不变
-//     const byId = new Map(rows.map(r => [r.id, { ...r, children: [] as any[] }]));
-//     const roots: any[] = [];
-//     for (const r of byId.values()) {
-//         if (r.parentID != null && byId.has(r.parentID)) byId.get(r.parentID)!.children.push(r);
-//         else roots.push(r);
-//     }
-//     const list: Array<{ id: any; path: string }> = [];
-//     (function dfs(ns: any[], prefix: string) {
-//         for (const n of ns) {
-//             const p = prefix ? `${prefix} / ${n.name}` : n.name;
-//             list.push({ id: n.id, path: p });
-//             if (n.children.length) dfs(n.children, p);
-//         }
-//     })(roots, "");
-//     return list.sort((a, b) => a.path.localeCompare(b.path));
-// }
 
 // 一把取全库所有集合（含子集合），并生成“A / B / C”路径
 async function getCollections(win: any) {
@@ -165,6 +84,8 @@ export async function mountDropdown(win: Window) {
     const styleHost = d.head || d.documentElement!;
     const uiHost = d.body || d.documentElement!;
 
+    // let prefPanelHeight = getPanelHeight(); // Panel height (px)
+
     // ===== 样式：标题栏按钮 + 悬浮面板 =====
     const style = d.createElement("style");
     style.id = "cdrop-style";
@@ -174,18 +95,27 @@ export async function mountDropdown(win: Window) {
       -moz-window-dragging: no-drag;       /* 标题栏里必须禁用拖拽，否则吃掉点击 */
       pointer-events: auto;
       display: inline-flex; align-items: center; gap: 6px;
-      height: 24px; padding: 0 10px; margin-right: 8px;
+      height: 28px; padding: 0 10px; margin-right: 8px; margin-left: 8px;
+      margin-top: auto; margin-bottom: auto;
       border: 1px solid var(--in-content-box-border-color, #ccc);
-      border-radius: 7px;
-      background: var(--in-content-box-background, #f5f5f5);
+      border-radius: 5px;
+      background: #ffffff;
       font: menu; font-size: 12px; line-height: 22px;
       cursor: pointer; user-select: none;
+      box-shadow: 0px 0px 0px .5px rgba(0,0,0,.05),0px .5px 2.5px 0px rgba(0,0,0,.3)
+      transition: .2s;
+    }
+
+    #cdrop-btn-titlebar:hover {
+      background: #9FBFD5;
+    }
+      }
     }
     #cdrop-btn-titlebar:focus { outline: none; }
 
     /* 面板 */
     #cdrop-panel {
-      position: fixed; width: 360px; max-height: 420px; display: none;
+      position: fixed; width: 360px; max-height: 1000px; display: none;
       z-index: 100000; background: #fff; border: 1px solid #ccc; border-radius: 8px;
       box-shadow: 0 8px 24px rgba(0,0,0,.15); padding: 8px;
     }
@@ -297,7 +227,29 @@ export async function mountDropdown(win: Window) {
         panel.style.left = `${left}px`;
         panel.style.top = `${rect.bottom + 6}px`;
     }
-    const open = () => { panel.classList.add("show"); positionPanel(); void ensureLoaded(); search.focus(); };
+    const open = async () => {
+        panel.classList.add("show");
+        positionPanel();
+        void ensureLoaded();
+        search.focus();
+        let prefEnableTreePane = getEnableTreePane();  // 是否启用二级目录导航功能
+        let prefPanelHeight = getPanelHeight();      // 面板高度（px）
+        dlog(win, `[cdrop] prefs: enableTreePane=${prefEnableTreePane} panelHeight=${prefPanelHeight}`);
+        if (!prefEnableTreePane) {
+            const rmID = "cdrop-tree";
+
+            // 开关
+            if (!getEnableTreePane()) {
+                d.getElementById(rmID)?.remove();
+                return;
+            }
+        };
+        try {
+            await cdropInstallTreeNav(win);
+        } catch (e) {
+            dlog(win, '[cdrop] cdropInstallTreeNav error');
+        }
+    };
     const close = () => panel.classList.remove("show");
 
     const onBtnClick = (e: MouseEvent) => {
@@ -319,15 +271,34 @@ export async function mountDropdown(win: Window) {
         onDocMouseDown,
         onBtnClick,
     });
-    Zotero.debug?.("[cdrop] mount: inserted at #zotero-title-bar (first child)");
+    // Zotero.debug?.("[cdrop] mount: inserted at #zotero-title-bar (first child)");
+
+    // let prefEnableTreePane = getEnableTreePane();  // 是否启用二级目录导航功能
+    // let prefPanelHeight = getPanelHeight();      // 面板高度（px）
 
     // ===== 安装二级目录功能 =====
-    if (!treeNavEnabled) return;
-    try {
-        await cdropInstallTreeNav(win);
-    } catch (e) {
-        dlog(win, '[cdrop] cdropInstallTreeNav error');
-    }
+    // dlog(win, `[cdrop] prefs: enableTreePane=${prefEnableTreePane} panelHeight=${prefPanelHeight}`);
+    // if (!prefEnableTreePane) return;
+    // try {
+    //     await cdropInstallTreeNav(win);
+    // } catch (e) {
+    //     dlog(win, '[cdrop] cdropInstallTreeNav error');
+    // };
+
+    // startPrefObserver(async (pref) => {
+    //     // 只在我们关心的两个键变化时刷新
+    //     if (pref.endsWith("enableTreePane") || pref.endsWith("panelHeight")) {
+    //         let prefEnableTreePane = getEnableTreePane();
+    //         dlog(win, `[cdrop] pref changed: ${pref} → ${String(prefEnableTreePane)}`);
+    //         // let prefPanelHeight = getPanelHeight();      // 面板高度（px）
+    //         if (!prefEnableTreePane) return;
+    //         try {
+    //             await cdropInstallTreeNav(win);
+    //         } catch (e) {
+    //             dlog(win, '[cdrop] cdropInstallTreeNav error');
+    //         };
+    //     }
+    // });
 }
 
 
@@ -438,6 +409,7 @@ export function unmountDropdown(win: Window) {
     nodes.panel.remove();
 
     nodeRegistry.delete(win);
+    stopPrefObserver();
 }
 
 /* ============================================
@@ -459,7 +431,7 @@ async function cdropInstallTreeNav(win: any) {                 // 新增一个�
     function ensureTreeNavStyle() {
         const css = `
   #cdrop-tree{
-    height:320px;overflow:auto;padding:6px 8px;box-sizing:border-box;
+    height:${getPanelHeight()}px;overflow:auto;padding:6px 8px;box-sizing:border-box;
     font-size:12px;line-height:1.5;
   }
   /* 统一可点击节点的块级表现与内边距 */

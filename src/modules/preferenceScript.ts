@@ -37,7 +37,7 @@ export async function registerPrefsScripts(_window: Window) {
   } else {
     addon.data.prefs.window = _window;
   }
-  updatePrefsUI();
+  // updatePrefsUI();
   bindPrefEvents();
 }
 
@@ -106,26 +106,55 @@ async function updatePrefsUI() {
   ztoolkit.log("Preference table rendered!");
 }
 
+// function bindPrefEvents() {
+//   addon.data
+//     .prefs!.window.document?.querySelector(
+//       `#zotero-prefpane-${config.addonRef}-enable`,
+//     )
+//     ?.addEventListener("command", (e: Event) => {
+//       ztoolkit.log(e);
+//       addon.data.prefs!.window.alert(
+//         `Successfully changed to ${(e.target as XUL.Checkbox).checked}!`,
+//       );
+//     });
+
+//   addon.data
+//     .prefs!.window.document?.querySelector(
+//       `#zotero-prefpane-${config.addonRef}-input`,
+//     )
+//     ?.addEventListener("change", (e: Event) => {
+//       ztoolkit.log(e);
+//       addon.data.prefs!.window.alert(
+//         `Successfully changed to ${(e.target as HTMLInputElement).value}!`,
+//       );
+//     });
+// }
 function bindPrefEvents() {
+  // 勾选开关时的提示（XUL checkbox 用 command 事件）
   addon.data
     .prefs!.window.document?.querySelector(
-      `#zotero-prefpane-${config.addonRef}-enable`,
+      `#zotero-prefpane-${config.addonRef}-enableTreePane`,
     )
     ?.addEventListener("command", (e: Event) => {
-      ztoolkit.log(e);
-      addon.data.prefs!.window.alert(
-        `Successfully changed to ${(e.target as XUL.Checkbox).checked}!`,
-      );
+      const checked = (e.target as XUL.Checkbox).checked;
+      ztoolkit.log({ enableTreePane: checked });
+      // 仅展示用：实际保存已由 preference="enableTreePane" 自动完成
+      // addon.data.prefs!.window.alert(`已切换为：${checked}`);
     });
 
+  // 调整高度时的提示/校验（HTML input 用 change 事件）
   addon.data
     .prefs!.window.document?.querySelector(
-      `#zotero-prefpane-${config.addonRef}-input`,
+      `#zotero-prefpane-${config.addonRef}-panelHeight`,
     )
     ?.addEventListener("change", (e: Event) => {
-      ztoolkit.log(e);
-      addon.data.prefs!.window.alert(
-        `Successfully changed to ${(e.target as HTMLInputElement).value}!`,
-      );
+      const el = e.target as HTMLInputElement;
+      let v = Number(el.value);
+      if (!Number.isFinite(v)) v = 420;
+      v = Math.max(200, Math.min(1200, v));
+      if (String(v) !== el.value) el.value = String(v); // 规范回写
+      ztoolkit.log({ panelHeight: v });
+      // 仅展示用：实际保存已由 preference="panelHeight" 自动完成
+      // addon.data.prefs!.window.alert(`高度已设为：${v}px`);
     });
 }

@@ -25,13 +25,13 @@ export async function onStartup(): Promise<void> {
 
   initLocale();
   BasicExampleFactory.registerPrefs();
-  BasicExampleFactory.registerNotifier();
-  KeyExampleFactory.registerShortcuts();
-  await UIExampleFactory.registerExtraColumn();
-  await UIExampleFactory.registerExtraColumnWithCustomCell();
-  UIExampleFactory.registerItemPaneCustomInfoRow();
-  UIExampleFactory.registerItemPaneSection();
-  UIExampleFactory.registerReaderItemPaneSection();
+  // BasicExampleFactory.registerNotifier();
+  // KeyExampleFactory.registerShortcuts();
+  // await UIExampleFactory.registerExtraColumn();
+  // await UIExampleFactory.registerExtraColumnWithCustomCell();
+  // UIExampleFactory.registerItemPaneCustomInfoRow();
+  // UIExampleFactory.registerItemPaneSection();
+  // UIExampleFactory.registerReaderItemPaneSection();
 
   // 对“当前已打开”的所有主窗口做挂载
   await Promise.all(
@@ -56,13 +56,13 @@ export async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<vo
   await Zotero.Promise.delay(1000);
   popupWin.changeLine({ progress: 30, text: `[30%] ${getString("startup-begin")}` });
 
-  UIExampleFactory.registerStyleSheet(win);
-  UIExampleFactory.registerRightClickMenuItem();
-  UIExampleFactory.registerRightClickMenuPopup(win);
-  UIExampleFactory.registerWindowMenuWithSeparator();
-  PromptExampleFactory.registerNormalCommandExample();
-  PromptExampleFactory.registerAnonymousCommandExample(win);
-  PromptExampleFactory.registerConditionalCommandExample();
+  // UIExampleFactory.registerStyleSheet(win);
+  // UIExampleFactory.registerRightClickMenuItem();
+  // UIExampleFactory.registerRightClickMenuPopup(win);
+  // UIExampleFactory.registerWindowMenuWithSeparator();
+  // PromptExampleFactory.registerNormalCommandExample();
+  // PromptExampleFactory.registerAnonymousCommandExample(win);
+  // PromptExampleFactory.registerConditionalCommandExample();
 
   // ★ 在窗口里挂载“集合下拉”
   try { unmountDropdown(win); } catch { }
@@ -72,7 +72,7 @@ export async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<vo
   popupWin.changeLine({ progress: 100, text: `[100%] ${getString("startup-finish")}` });
   popupWin.startCloseTimer(5000);
 
-  addon.hooks.onDialogEvents("dialogExample");
+  // addon.hooks.onDialogEvents("dialogExample");
 }
 
 export async function onMainWindowUnload(win: _ZoteroTypes.MainWindow): Promise<void> {

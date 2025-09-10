@@ -1,36 +1,13 @@
 import { config } from "../../package.json";
+declare const Zotero: any;
 
-type PluginPrefsMap = _ZoteroTypes.Prefs["PluginPrefsMap"];
+const PREFIX = `extensions.zotero.${config.addonRef}.` as const;
 
-const PREFS_PREFIX = config.prefsPrefix;
-
-/**
- * Get preference value.
- * Wrapper of `Zotero.Prefs.get`.
- * @param key
- */
-export function getPref<K extends keyof PluginPrefsMap>(key: K) {
-  return Zotero.Prefs.get(`${PREFS_PREFIX}.${key}`, true) as PluginPrefsMap[K];
+export function getEnableTreePane(): boolean {
+  return !!Zotero.Prefs.get(PREFIX + "prefEnableTreePane", true);
 }
 
-/**
- * Set preference value.
- * Wrapper of `Zotero.Prefs.set`.
- * @param key
- * @param value
- */
-export function setPref<K extends keyof PluginPrefsMap>(
-  key: K,
-  value: PluginPrefsMap[K],
-) {
-  return Zotero.Prefs.set(`${PREFS_PREFIX}.${key}`, value, true);
-}
-
-/**
- * Clear preference value.
- * Wrapper of `Zotero.Prefs.clear`.
- * @param key
- */
-export function clearPref(key: string) {
-  return Zotero.Prefs.clear(`${PREFS_PREFIX}.${key}`, true);
+export function getPanelHeight(): number {
+  const v = Number(Zotero.Prefs.get(PREFIX + "prefPanelHeight", true));
+  return Number.isFinite(v) ? v : 420;
 }
