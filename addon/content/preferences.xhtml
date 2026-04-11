@@ -5,18 +5,22 @@
   onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window });"
 >
   <label><html:h2 data-l10n-id="pref-title"></html:h2></label>
-  <caption label="Tree panel" />
+  <caption label="Collections Panel" />
   <checkbox
     id="zotero-prefpane-${addonRef}-prefEnableTreePane"
-    label="Enable the tree panel"
-    preference="prefEnableTreePane"/>
+    label="Enable tree view"
+    preference="prefEnableTreePane"
+  />
   <hbox align="center">
-    <label value="Panel Height (px)：" />
+    <label value="Panel height (px)" />
     <html:input
       id="zotero-prefpane-${addonRef}-prefPanelHeight"
       type="number"
-      min="200" max="1200" step="10"
-      preference="prefPanelHeight"/>
+      min="200"
+      max="1200"
+      step="10"
+      preference="prefPanelHeight"
+    />
   </hbox>
 </groupbox>
 <vbox>
@@ -25,4 +29,3 @@
     data-l10n-args='{"time": "__buildTime__","name": "__addonName__","version":"__buildVersion__"}'
   ></html:label>
 </vbox>
-
