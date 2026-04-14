@@ -8,6 +8,8 @@ yarn.lock
 
 # TSC
 tsconfig.tsbuildinfo
+NUL
+_UL
 
 # Scaffold
 .env
